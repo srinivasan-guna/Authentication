@@ -8,6 +8,7 @@ const passport = require ("passport");
 //passportlocalmongoose use = automatically SALTS & HASH the password
 const passportLocalMongoose = require("passport-local-mongoose");
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const FacebookStrategy = require('passport-facebook').Strategy;
 //This NPM package is reuired to use "findOrCreate" method for GOOGLE authentication
 const findOrCreate = require('mongoose-findorcreate');
 
@@ -34,13 +35,16 @@ mongoose.set('useCreateIndex', true);
 
 //object created from a mongoose.Schema class = need it for encryption
 const userSchema = new mongoose.Schema({
-  email: String,
+  username: {type: String, unique: true}, // values: email address, googleId, facebookId
   password: String,
-  googleId: String,
+  provider: String, // values: 'local', 'google', 'facebook'
+  email: String,
   secret: Array
 });
 
-userSchema.plugin(passportLocalMongoose);
+userSchema.plugin(passportLocalMongoose, {
+  usernameField: "username"
+});
 userSchema.plugin(findOrCreate);
 //Creating model for the Schema
 const User = new mongoose.model("User", userSchema);
@@ -68,10 +72,37 @@ passport.use(new GoogleStrategy({
   },
   function(accessToken, refreshToken, profile, cb) {
     //console.log(profile);
-    User.findOrCreate({ googleId: profile.id }, function (err, user) {
-      return cb(err, user);
+    User.findOrCreate(
+      { username: profile.id },
+      {
+        provider: "google",
+        email: profile._json.email
+      },
+      function (err, user) {
+        return cb(err, user);
     });
   }
+));
+
+//using a new facebook strategy
+passport.use(new FacebookStrategy({
+        clientID: process.env.FACEBOOK_APP_ID,
+        clientSecret: process.env.FACEBOOK_APP_SECRET,
+        callbackURL: "http://localhost:3000/auth/facebook/secrets",
+        profileFields: ["id", "email"]
+    },
+    function (accessToken, refreshToken, profile, cb) {
+        User.findOrCreate(
+          { username: profile.id },
+          {
+            provider: "facebook",
+            email: profile._json.email
+          },
+          function (err, user) {
+            return cb(err, user);
+          }
+        );
+    }
 ));
 
 app.get("/", function(req, res){
@@ -79,7 +110,7 @@ app.get("/", function(req, res){
 });
 
 app.get("/auth/google",
-  passport.authenticate("google", { scope: ["profile"] })
+  passport.authenticate("google", { scope: ["profile", "email"] })
 );
 
 app.get("/auth/google/secrets",
@@ -88,6 +119,20 @@ app.get("/auth/google/secrets",
     // Successful authentication, redirect home.
     res.redirect("/secrets");
   });
+
+  //  /auth/facebook GET route
+app.get("/auth/facebook",
+    passport.authenticate("facebook", {
+      scope: ["email"]
+    })
+  );
+
+app.get("/auth/facebook/secrets",
+    passport.authenticate('facebook', { failureRedirect: "/login" }),
+      function(req, res) {
+          // Successful authentication, redirect home.
+          res.redirect('/secrets');
+        });
 
 app.get("/login", function(req, res){
     res.render("login");
@@ -153,9 +198,11 @@ app.get("/logout", function(req,res){
 });
 
 app.post("/register", function(req, res){
+  const username = req.body.username;
+  const password = req.body.password;
   // register() comes from requiring the passportLocalMongoose
   //don't need to create a new user and no direct interaction with mongoose
-  User.register({username: req.body.username}, req.body.password, function(err, user){
+  User.register({username: username}, password, function(err, user){
     if(err){
       console.log(err);
       //redirect to the register page so the user can try again
@@ -164,7 +211,12 @@ app.post("/register", function(req, res){
     else{
         //authenticate the user using passport
         passport.authenticate("local")(req, res, function(){
-          res.redirect("/secrets");
+          User.updateOne(
+            {_id: user._id},
+            { $set: { provider: "local", email: username } },function(){
+              res.render("/secrets");
+            }
+          );
       });
     }
   });
