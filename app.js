@@ -30,7 +30,9 @@ app.use(passport.initialize());
 //ask passport to deal with the session
 app.use(passport.session());
 
-mongoose.connect("mongodb://localhost:27017/userDB", {useNewUrlParser: true, useUnifiedTopology: true });
+//mongoose.connect("mongodb://localhost:27017/userDB", {useNewUrlParser: true, useUnifiedTopology: true });
+mongoose.connect("mongodb+srv://Admin-Seenu:test123@cluster0.88rdq.mongodb.net/authenticationDB", {useNewUrlParser: true, useUnifiedTopology: true });
+
 mongoose.set('useCreateIndex', true);
 
 //object created from a mongoose.Schema class = need it for encryption
@@ -214,7 +216,7 @@ app.post("/register", function(req, res){
           User.updateOne(
             {_id: user._id},
             { $set: { provider: "local", email: username } },function(){
-              res.render("/secrets");
+              res.redirect("/secrets");
             }
           );
       });
@@ -233,13 +235,19 @@ app.post("/login", function(req, res){
   req.login(user, function(err){
     if(err){
       console.log(err);
+      res.redirect("/register");
     }
     else{
-      passport.authenticate("local")(req, res, function(){
-        res.redirect("/secrets");
+      //successReturnToOrRedirect & failureRedirect comes from npm connect-ensure-login pack
+      passport.authenticate("local",
+      { successReturnToOrRedirect: "/secrets", failureRedirect: "/register" }
+    )
+      (req, res, function(){
+        //Callback is needed to run this part of code
     });
-    }
+  }
   });
+
 });
 
 
